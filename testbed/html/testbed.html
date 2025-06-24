@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DES-Line Testbed</title>
+  <link rel="stylesheet" href="testbed.css">
+</head>
+<body>
+  <h1>DES-Line</h1>
+  <div class="container">
+    <!-- ─────────────── 현상-애칭 패널 (PLC 20) ─────────────── -->
+    <div class="jog-window">
+      <h2>현상-애칭</h2>
+      <div class="switch-container">
+        <button id="swAuto"   class="switch" data-ip="20" data-var="%MX00053">Auto</button>
+        <button id="swManual" class="switch" data-ip="20" data-var="%MX00054">Manual</button>
+        <button id="swStart"  class="switch" data-ip="20" data-var="%MX00000">Start</button>
+        <button id="swStop"   class="switch" data-ip="20" data-var="%MX00005">Stop</button>
+        <button id="btnInitial" class="btn" data-ip="20" data-var="%MX00019">Initial</button>
+      </div>
+      <table class="jog-table">
+        <thead><tr><th></th><th>현상</th><th>애칭</th></tr></thead>
+        <tbody>
+          <tr><td>속도</td><td id="DW2500">0.0</td><td id="DW2510">0.0</td></tr>
+          <tr><td>유량</td><td id="DW2502">0.0</td><td id="DW2512">0.0</td></tr>
+          <tr><td>온도</td><td id="DW2506">0.0</td><td id="DW2516">0.0</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ─────────────── 박리-건조 패널 (PLC 21) ─────────────── -->
+    <div class="jog-window">
+      <h2>박리-건조</h2>
+      <div class="switch-container">
+        <button id="swAuto1"   class="switch" data-ip="21" data-var="%MX00053">Auto</button>
+        <button id="swManual1" class="switch" data-ip="21" data-var="%MX00054">Manual</button>
+        <button id="swStart1"  class="switch" data-ip="21" data-var="%MX00000">Start</button>
+        <button id="swStop1"   class="switch" data-ip="21" data-var="%MX00019">Stop</button>
+        <button id="btnInitial1" class="btn" data-ip="21" data-var="%MX00016">Initial</button>
+        <button id="btnRobotInit1" class="btn" data-ip="21" data-var="%MX00450">Robot Init</button>
+      </div>
+      <table class="jog-table">
+        <thead><tr><th></th><th>박리</th><th>건조</th></tr></thead>
+        <tbody>
+          <tr><td>속도</td><td id="DW2520">0.0</td><td id="DW2530">0.0</td></tr>
+          <tr><td>온도</td><td id="DW2002">0.0</td><td id="DW2004">0.0</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="status">연결 상태: <span id="conn">⏳</span></div>
+
+  <script>
+    const WS_URL = 'ws://25.3.90.101:8777';
+    const connEl = document.getElementById('conn');
+    const socket = new WebSocket(WS_URL);
+
+    socket.addEventListener('open', () => {
+      connEl.textContent = '연결됨'; connEl.style.color = '#0f0';
+      document.querySelectorAll('[data-var]').forEach(el => {
+        socket.send(JSON.stringify({cmd:'subscribe', tag:`${el.dataset.var}@${el.dataset.ip}`}));
+      });
+      // 현상-애칭 DW 구독
+      ['%DW2500','%DW2502','%DW2506','%DW2510','%DW2512','%DW2516'].forEach(addr => {
+        socket.send(JSON.stringify({cmd:'subscribe', tag:`${addr}@20`}));
+      });
+      // 박리-건조 DW 구독
+      ['%DW2520','%DW2002','%DW2530','%DW2004'].forEach(addr => {
+        socket.send(JSON.stringify({cmd:'subscribe', tag:`${addr}@21`}));
+      });
+    });
+    socket.addEventListener('close', ()=>{ connEl.textContent='종료'; connEl.style.color='#f00'; });
+    socket.addEventListener('error', ()=>{ connEl.textContent='에러'; connEl.style.color='#f80'; });
+
+    socket.addEventListener('message', e => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      if (!msg.tag) return;
+      const [addr, ip] = msg.tag.split('@');
+      const el = document.getElementById(addr.replace('%',''));
+      if (el) {
+        let num = parseFloat(msg.value);
+        if (!isNaN(num)) {
+          num = num / 1000;
+          el.textContent = num.toFixed(1);
+        } else {
+          el.textContent = msg.value;
+        }
+      }
+    });
+
+    function sendWrite(ip, varAddr, value) {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({cmd:'write', ip, var:varAddr, value}));
+    }
+    document.querySelectorAll('.switch, .btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const active = !btn.classList.contains('active');
+        const ip = btn.dataset.ip;
+        const varAddr = btn.dataset.var;
+        sendWrite(ip, varAddr, active ? 1 : 0);
+        btn.classList.toggle('active', active);
+        let peer = null;
+        const id = btn.id;
+        if(id.includes('Auto')) peer='Manual';
+        else if(id.includes('Manual')) peer='Auto';
+        else if(id.includes('Start')) peer='Stop';
+        else if(id.includes('Stop')) peer='Start';
+        if (peer) {
+          const p = btn.closest('.switch-container').querySelector(`[id*='${peer}']`);
+          if (p) p.classList.remove('active');
+        }
+      });
+    });
+  </script>
+</body>
+</html>

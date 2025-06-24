@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DES-Line Testbed</title>
+  <link rel="stylesheet" href="v1.css">
+</head>
+<body>
+  <h1>DES-Line</h1>
+
+  <!-- 레이아웃 편집/복원 버튼 -->
+  <div class="btn-container">
+    <button id="editLayoutBtn" class="btn-small">레이아웃 편집</button>
+    <button id="resetLayoutBtn" class="btn-small">기본 복원</button>
+  </div>
+
+  <!-- 패널 그룹 컨테이너 -->
+  <div class="container" id="container"></div>
+
+  <!-- 상태 표시 -->
+  <div id="status">연결 상태: <span id="conn">⏳</span></div>
+
+  <!-- 레이아웃 편집 모달 -->
+  <div id="layoutModal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <h3>레이아웃 편집</h3>
+      <select id="panelSelect"></select>
+      <table id="buttonTable" class="layout-table"></table>
+      <div class="btn-container">
+        <button id="addButtonRow" class="btn-small">추가</button>
+        <button id="applyLayout" class="btn-small">적용</button>
+        <button id="cancelLayout" class="btn-small">취소</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let socket;
+    let currentConfig, editingConfig, editingPanelIdx = 0;
+    let sendJSON;
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('v1.json'); if (res.ok) return await res.json();
+      } catch {}
+      return { panels: [] };
+    }
+
+    function rebuildUI(cfg) {
+      currentConfig = cfg;
+      const cont = document.getElementById('container'); cont.innerHTML = '';
+      cfg.panels.forEach(p => {
+        const box = document.createElement('div'); box.className = 'jog-window';
+        box.innerHTML = `<h2>${p.title}</h2><div class="switch-container"></div>`;
+        const sc = box.querySelector('.switch-container');
+        p.buttons.forEach(info => {
+          const prefix = info.class === 'switch' ? 'sw' : 'btn';
+          const id = prefix + info.id + (p.suffix || '');
+          const b = document.createElement('button');
+          b.id = id; b.className = info.class; b.textContent = info.id; // 버튼 이름 = ID
+          b.dataset.mem = info.mem; b.dataset.type = info.type;
+          if (info.counterpart) b.dataset.counterpart = prefix + info.counterpart + (p.suffix || '');
+          if (info.requires) b.dataset.requires = prefix + info.requires + (p.suffix || '');
+          b.dataset.ip = p.suffix ? '21' : '20';
+          sc.appendChild(b);
+        });
+        const tbl = document.createElement('table'); tbl.className = 'jog-table';
+        tbl.innerHTML = `<thead><tr><th></th><th>${p.columns[0]}</th><th>${p.columns[1]}</th></tr></thead><tbody>` +
+          p.rows.map(r => `<tr><td>${r.label}</td><td id="${r.dev}">0.0</td><td id="${r.etc}">0.0</td></tr>`).join('') + `</tbody>`;
+        box.appendChild(tbl); cont.appendChild(box);
+      });
+    }
+
+    function setupButtons() {
+      document.querySelectorAll('.switch, .btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (btn.dataset.requires) {
+            const req = document.getElementById(btn.dataset.requires);
+            if (!req.classList.contains('active')) return;
+          }
+          const on = !btn.classList.contains('active');
+          btn.classList.toggle('active', on);
+          sendWrite(btn.dataset.ip, btn.dataset.mem, on ? 1 : 0);
+          if (btn.dataset.counterpart) {
+            const cp = document.getElementById(btn.dataset.counterpart);
+            if (cp && cp.classList.contains('active')) {
+              cp.classList.remove('active'); sendWrite(cp.dataset.ip, cp.dataset.mem, 0);
+            }
+          }
+        });
+      });
+    }
+
+    function setupWS() {
+      const connEl = document.getElementById('conn');
+      socket = new WebSocket('ws://25.3.90.101:8777');
+      socket.addEventListener('open', () => { connEl.textContent = '연결됨'; connEl.style.color = '#0f0'; resubscribeAll(); });
+      socket.addEventListener('close', () => { connEl.textContent = '종료'; connEl.style.color = '#f00'; });
+      socket.addEventListener('error', () => { connEl.textContent = '에러'; connEl.style.color = '#f80'; });
+      socket.addEventListener('message', e => {
+        let msg;
+        try {
+          msg = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        if (!msg.tag) return;
+        const [addr] = msg.tag.split('@');
+        // 각 패널에서 해당 행 찾기
+        for (const panel of currentConfig.panels) {
+          const row = panel.rows.find(r => `%${r.dev}` === addr || `%${r.etc}` === addr);
+          if (row) {
+            const displayId = (`%${row.dev}` === addr) ? row.dev : row.etc;
+            const el = document.getElementById(displayId);
+            if (el) {
+              const num = parseFloat(msg.value);
+              el.textContent = isNaN(num) ? msg.value : num.toFixed(1);
+            }
+            break;
+          }
+        }
+      });
+
+      return (node, value) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ node, value })); };
+    }
+    function sendWrite(ip, mem, value) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          cmd: 'write',
+          ip: ip,
+          var: `%${mem}`,
+          value: value
+        }));
+      }
+    }
+    function resubscribeAll() {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      currentConfig.panels.forEach(p => {
+        p.buttons.forEach(b => socket.send(JSON.stringify({cmd:'subscribe', tag:`%${b.mem}@${p.suffix?'21':'20'}`})));
+        p.rows.forEach(r => ['dev','etc'].forEach(k => socket.send(JSON.stringify({cmd:'subscribe', tag:`%${r[k]}@${p.suffix?'21':'20'}`}))));
+      });
+    }
+
+    function openEditor() {
+      editingConfig = JSON.parse(JSON.stringify(currentConfig)); editingPanelIdx = 0;
+      const sel = document.getElementById('panelSelect'); sel.innerHTML = '';
+      editingConfig.panels.forEach((p,i) => sel.add(new Option(p.title, i)));
+      sel.onchange = () => { saveEdits(editingPanelIdx); editingPanelIdx = Number(sel.value); renderButtonTable(editingPanelIdx); };
+      renderButtonTable(0); document.getElementById('layoutModal').style.display = 'flex';
+    }
+    function closeEditor() { document.getElementById('layoutModal').style.display = 'none'; }
+
+    function renderButtonTable(idx) {
+      const table = document.getElementById('buttonTable');
+      table.innerHTML = '<tr><th>ID</th><th>라벨</th><th>메모리</th><th>타입</th><th></th></tr>';
+      const panel = editingConfig.panels[idx];
+      panel.buttons.forEach((b,i) => {
+        const tr = table.insertRow(); tr.dataset.index = i;
+        // ID 입력
+        const tdId = tr.insertCell(); tdId.innerHTML = `<input data-field="id" value="${b.id||''}">`;
+        // Label 입력
+        const tdLabel = tr.insertCell(); tdLabel.innerHTML = `<input data-field="label" value="${b.label||''}">`;
+        // Mem 입력
+        const tdMem = tr.insertCell(); tdMem.innerHTML = `<input data-field="mem" value="${b.mem||''}">`;
+        // Type select
+        const tdType = tr.insertCell();
+        tdType.innerHTML = `
+          <select data-field="type">
+            <option value="bit"${b.type==='bit'?' selected':''}>bit</option>
+            <option value="byte"${b.type==='byte'?' selected':''}>byte</option>
+            <option value="word"${b.type==='word'?' selected':''}>word</option>
+            <option value="dword"${b.type==='dword'?' selected':''}>dword</option>
+            <option value="lword"${b.type==='lword'?' selected':''}>lword</option>
+          </select>`;
+        // 삭제 버튼
+        const tdDel = tr.insertCell(); tdDel.innerHTML = '<button data-action="delete">삭제</button>';
+        tdDel.firstChild.onclick = () => { panel.buttons.splice(i,1); renderButtonTable(idx); };
+      });
+    }
+
+    function saveEdits(idx) {
+      document.querySelectorAll('#buttonTable tr[data-index]').forEach(r => {
+        const i = Number(r.dataset.index);
+        ['id','label','mem'].forEach(f => { editingConfig.panels[idx].buttons[i][f] = r.querySelector(`[data-field="${f}"]`).value; });
+        // select value
+        const t = r.querySelector('select[data-field="type"]').value;
+        editingConfig.panels[idx].buttons[i].type = t;
+      });
+    }
+
+    document.getElementById('editLayoutBtn').onclick = openEditor;
+    document.getElementById('cancelLayout').onclick = closeEditor;
+    document.getElementById('resetLayoutBtn').onclick = () => { localStorage.removeItem('layout'); location.reload(); };
+    document.getElementById('addButtonRow').onclick = () => {
+      saveEdits(editingPanelIdx);
+      editingConfig.panels[editingPanelIdx].buttons.push({id:'New',label:'새버튼',mem:'New',type:'bit'});
+      renderButtonTable(editingPanelIdx);
+    };
+    document.getElementById('applyLayout').onclick = () => {
+      saveEdits(editingPanelIdx);
+      currentConfig.panels[editingPanelIdx] = editingConfig.panels[editingPanelIdx];
+      localStorage.setItem('layout', JSON.stringify(currentConfig));
+      rebuildUI(currentConfig);
+      setupButtons(sendJSON);
+      closeEditor();
+    };
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      currentConfig = await loadConfig();
+      rebuildUI(currentConfig);
+      sendJSON = setupWS();
+      setupButtons(sendJSON);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "panels": [
+    {
+      "title": "현상-애칭",
+      "suffix": "",
+      "buttons": [
+        {"id": "Auto",    "label": "%MX00053", "class": "switch", "mem": "MX00053", "type": "bit", "counterpart": "Manual"},
+        {"id": "Manual",  "label": "%MX00054", "class": "switch", "mem": "MX00054", "type": "bit", "counterpart": "Auto"},
+        {"id": "Start",   "label": "%MX00000", "class": "switch", "mem": "MX00000", "type": "bit", "counterpart": "Stop", "requires": "Auto"},
+        {"id": "Stop",    "label": "%MX00005", "class": "switch", "mem": "MX00005", "type": "bit", "counterpart": "Start"},
+        {"id": "Initial", "label": "%MX00019", "class": "btn",    "mem": "MX00019", "type": "bit"}
+      ],
+      "columns": ["현상", "에칭"],
+      "rows": [
+        {"label": "속도", "dev": "dev_rpm", "etc": "etc_rpm"},
+        {"label": "유량", "dev": "dev_flux", "etc": "etc_flux"},
+        {"label": "온도", "dev": "dev_tem", "etc": "etc_tem"}
+      ]
+    },
+    {
+      "title": "박리-건조",
+      "suffix": "1",
+      "buttons": [
+        {"id": "Auto",    "label": "%MX00053", "class": "switch", "mem": "MX00053", "type": "bit", "counterpart": "Manual"},
+        {"id": "Manual",  "label": "%MX00054", "class": "switch", "mem": "MX00054", "type": "bit", "counterpart": "Auto"},
+        {"id": "Start",   "label": "%MX00000", "class": "switch", "mem": "MX00000", "type": "bit", "counterpart": "Stop", "requires": "Auto"},
+        {"id": "Stop",    "label": "%MX00019", "class": "switch", "mem": "MX00019", "type": "bit", "counterpart": "Start"},
+        {"id": "Initial", "label": "%MX00016", "class": "btn",    "mem": "MX00016", "type": "bit"}
+      ],
+      "columns": ["박리", "건조"],
+      "rows": [
+        {"label": "속도", "dev": "DW2520", "etc": "DW2530"},
+        {"label": "온도", "dev": "DW2002", "etc": "DW2004"}
+      ]
+    }
+  ]
+}
